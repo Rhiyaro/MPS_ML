@@ -8,8 +8,8 @@ import src.my_logging as mylog
 from src.data_io.data_io import DataIO
 from src.manager_manual import ManagerManual
 from src.sql_connection import SQLConnection  # pylint: disable=unused-import
-from src.tchala import Tchala
-from src.tchala_classifier.tchala_classifier import TchalaClassifier
+from src.ml_model import MLModel
+from src.tchala_classifier.tchala_classifier import MLModelClassifier
 from src.tchala_regressor.tchala_regressor import TchalaRegressor
 
 # from src.tchala_regressor.tchala_regressor import TchalaRegressor
@@ -83,7 +83,7 @@ if __name__ == "__main__":
     tchalas.append(
         TchalaRegressor(
             target_channels=target_channels,
-            turbine_level=Tchala.LEVEL_TURBINE,
+            turbine_level=MLModel.LEVEL_TURBINE,
             sql_connection=sql_connection,
         )
     )
@@ -111,7 +111,7 @@ if __name__ == "__main__":
     # Training
 
     # manager.train_all_turbines(individual_turbines=True)
-    manager.train_turbine(turbine_reg_id=60520, individual_turbines=True)
+    manager.train_panel(panel_id=60520, individual_panels=True)
 
     mylog.INFO_LOGGER.info("All trainings done")
     print("Done")

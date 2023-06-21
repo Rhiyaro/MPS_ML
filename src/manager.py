@@ -8,26 +8,22 @@ import src.data_treatment as data_treatment
 from src import checker
 from src.data_io.data_io import DataIO
 from src.data_io.saver_to_file import SaverToFile
-from src.tchala import Tchala
-from src.tchala_classifier.tchala_classifier import TchalaClassifier
-from src.tchala_regressor.tchala_regressor import TchalaRegressor
+from src.ml_model import MLModel
 
 
 class Manager:
     def __init__(
-        self,
-        data_io: DataIO,
-        tchalas: list[Tchala],
-        keep_local: bool = False,
-        with_defects_only: bool = None,
-        with_defects_only_clauses: list[str] = None,
-        clean_all_nans: bool = False,
+            self,
+            data_io: DataIO,
+            models: list[MLModel],
+            params: dict,
+            with_defects_only: bool = None,
+            with_defects_only_clauses: list[str] = None,
+            clean_all_nans: bool = False,
+            usable_channels: list[int] = None
     ) -> None:
         self.data_io = data_io
-        self.tchalas = tchalas
-
-        # TODO: Finish implementation of this control
-        self.keep_local = keep_local & isinstance(data_io.saver, SaverToFile)
+        self.models = models
 
         self.clean_all_nans = clean_all_nans
 
@@ -36,81 +32,34 @@ class Manager:
         if with_defects_only is not None:
             self.with_defects_only = with_defects_only
             self.with_defects_only_clauses = with_defects_only_clauses
-        else:
-            self.with_defects_only = any(
-                isinstance(tchala, TchalaRegressor) for tchala in self.tchalas
-            )
 
-    # TODO Automatize in a smart way
-    def load_list_of_needed_channels(self, turbine_reg_id, mode):
-        # lists_of_channels = [
-        #     tchala.loader.load_list_of_needed_channels(turbine_reg_id, mode)
-        #     for tchala in self.tchalas]
-        # return list(set().union(*lists_of_channels))
-        return [
-            1,
-            2,
-            3,
-            # 5,
-            # 6,
-            7,
-            8,
-            9,
-            11,
-            # 12,
-            13,
-            16,
-            18,
-            19,
-            20,
-            # 21,
-            # 22,
-            # 23,
-            25,
-            26,
-            27,  # Used for seasonal correction
-            28,
-            29,
-            31,
-            32,
-            # 43,
-            # 44,
-            # 45,
-            50,  # Used for status ok pre-processing
-            53,  # Used in models and for power pre-processing
-        ]
+        if usable_channels is None:
+            self.usable_channels = [1, 2, 3, 4]
 
-    def load_turbine_model_sets(self):
-        return [[1, 2], [3, 4], [10, 11]]
+        self.params = params
 
-    def load_dates_train(self, turbine_reg_id):
-        dates = [
-            tchala.loader.load_dates_train(turbine_reg_id) for tchala in self.tchalas
-        ]
-        starts = [date_start_end[0] for date_start_end in dates]
-        ends = [date_start_end[1] for date_start_end in dates]
-        return min(starts), max(ends)
+    def load_dates_train(self, panel_id):
+        # TODO: Loads based on model definition
+        raise NotImplemented()
 
-    def load_dates_predict(self, turbine_reg_id):
-        dates = [
-            tchala.loader.load_dates_predict(tchala.turbine_level, turbine_reg_id)
-            for tchala in self.tchalas
-        ]
-        starts = [date_start_end[0] for date_start_end in dates]
-        ends = [date_start_end[1] for date_start_end in dates]
-        return min(starts), max(ends)
+    def load_dates_predict(self, panel_id):
+        # TODO: Loads based on model definition
+        raise NotImplemented()
 
-    def train_all_turbines(
-        self, complete_set: bool = True, individual_turbines: bool = True, individual_models: bool = True
+    def load_panels_model_sets(self):
+        return [[1], [2]]
+
+    def train_all_panels(
+            self, complete_set: bool = True, individual_panels: bool = True, individual_models: bool = True
     ) -> list[int]:
-        mylog.INFO_LOGGER.info("Starting all turbines")
-        turbine_model_sets = self.load_turbine_model_sets()
+        mylog.INFO_LOGGER.info("Starting all panels")
+        panel_model_sets = self.load_panels_model_sets()
         data_all = []
         failures_all = []
-        for turbine_model_set in turbine_model_sets:
-            data, failures = self.train_turbine_model(
-                turbine_model_reg_id=turbine_model_set,
-                individual_turbines=individual_turbines,
+        for panel_model_set in panel_model_sets:
+            data, failures = self.train_panel_model(
+                panel_model_id=panel_model_set,
+                individual_panels=individual_panels,
                 individual_models=individual_models,
             )
             if complete_set:
@@ -120,14 +69,14 @@ class Manager:
         if not complete_set:
             return []
 
-        mylog.INFO_LOGGER.info("Training for all turbines at once started")
+        mylog.INFO_LOGGER.info("Training for all panels at once started")
         data_all = pd.concat(data_all, axis=0)
         failures_all = pd.concat(failures_all, axis=0)
         self.train_general(
-            [tch for tch in self.tchalas if tch.turbine_level == Tchala.LEVEL_ALL],
+            [tch for tch in self.models if tch.model_level == MLModel.LEVEL_ALL],
             data_all,
             failures_all,
-            turbine_level=Tchala.LEVEL_ALL,
+            turbine_level=MLModel.LEVEL_ALL,
         )
 
         turbines_trained = list(data_all["TURBINE_REG_ID"].unique())
@@ -135,15 +84,16 @@ class Manager:
 
         return turbines_trained
 
-    def train_turbine_model(
-        self,
-        turbine_model_reg_id: list[int] | int,
-        individual_turbines: bool = True,
-        individual_models: bool = True,
+    def train_panel_model(
+            self,
+            panel_model_id: list[int] | int,
+            individual_panels: bool = True,
+            individual_models: bool = True,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
-        mylog.INFO_LOGGER.info(f"Starting turbines of model(s) {turbine_model_reg_id}")
-        turbine_reg_ids = self.data_io.loader.load_turbines_by_model(
-            turbine_model_reg_id
+        mylog.INFO_LOGGER.info(f"Starting panels of model(s) {panel_model_id}")
+
+        panel_ids = self.data_io.loader.load_panel_by_model_set(
+            panel_model_id
         )
         data_model = []
         failures_model = []
@@ -151,46 +101,22 @@ class Manager:
         if self.with_defects_only:
             date_start = self.params["train_date_start"]
             date_end = self.params["train_date_end"]
-            extra_clauses = [
-                "ACTION like 'replacement'",
-                "((ACTION_DATE is not null AND DATEDIFF(DAY, DEFECT_IDENTIFICATION_DATE, ACTION_DATE) > 10) or ACTION_DATE is null)",
-            ]
-            if self.with_defects_only_clauses is not None:
-                extra_clauses += self.with_defects_only_clauses
+
+            extra_clauses = self.with_defects_only_clauses
 
             all_failures = self.data_io.loader.load_all_failures(
                 date_start,
                 date_end,
                 extra_clauses=extra_clauses,
             )
-            failures_turbines = all_failures["TURBINE_REG_ID"].to_list()
-            turbine_reg_ids = list(
-                set(turbine_reg_ids).intersection(set(failures_turbines))
+            failure_panels = all_failures["panel_id"].to_list()
+            panel_ids = list(
+                set(panel_ids).intersection(set(failure_panels))
             )
 
-        # XXX: Here temporary
-        # query = (
-        #     """
-        #     SELECT 
-        #     [TURBINE_LEVEL]
-        #         ,[CHANNEL_REG_ID]
-        #         ,[INPUTS]
-        #         ,[TS_START]
-        #         ,[TS_END]
-        #         ,[TS_RUN]
-        #         FROM [dbo].[tchala_training_results_regressor]
-        #         WHERE TS_RUN >= '2023-06-10'
-        #         order by ts_run desc
-        #     """
-        #     )
-        # df_trains = self.data_io.loader.load_something(query)
-
-
-        turbine_reg_ids.sort()
-        for turbine_reg_id in turbine_reg_ids:
-            # if str(turbine_reg_id) in df_trains["TURBINE_LEVEL"].values:
-            #     continue
-            data, failures = self.train_turbine(turbine_reg_id, individual_turbines)
+        panel_ids.sort()
+        for panel_id in panel_ids:
+            data, failures = self.train_panel(panel_id, individual_panels)
             if individual_models:
                 data_model.append(data)
                 failures_model.append(failures)
@@ -198,27 +124,27 @@ class Manager:
         if not individual_models:
             return pd.DataFrame(), pd.DataFrame()
         mylog.INFO_LOGGER.info(
-            f"Training for turbine model(s) {turbine_model_reg_id} started"
+            f"Training for turbine model(s) {panel_model_id} started"
         )
         data_model = pd.concat(data_model, axis=0)
         failures_model = pd.concat(failures_model, axis=0)
 
         if individual_models:
             self.train_general(
-                [t for t in self.tchalas if t.turbine_level == Tchala.LEVEL_MODEL],
+                [t for t in self.models if t.model_level == MLModel.LEVEL_MODEL],
                 data_model,
                 failures_model,
-                turbine_level=Tchala.LEVEL_MODEL,
+                turbine_level=MLModel.LEVEL_MODEL,
             )
 
         return data_model, failures_model
 
-    def train_turbine(
-        self, turbine_reg_id: int, individual_turbines: bool = True
+    def train_panel(
+            self, panel_id: int, individual_panels: bool = True
     ) -> list[pd.DataFrame]:
-        mylog.INFO_LOGGER.info(f"Training for turbine {turbine_reg_id} started")
+        mylog.INFO_LOGGER.info(f"Training for turbine {panel_id} started")
         try:
-            date_start, date_end = self.load_dates_train(turbine_reg_id)
+            date_start, date_end = self.load_dates_train(panel_id)
 
             # Limiting date_end to 1 month before
             date_end = min(
@@ -231,57 +157,46 @@ class Manager:
                 ]
             )
 
-            data_turbine = self.prepare_turbine_data(
-                turbine_reg_id,
+            data_panel = self.prepare_panel_data(
+                panel_id,
                 date_start,
                 date_end,
-                downtime_ids_to_ignore=None,
-                remove_based_on_status=True,
-                remove_based_on_power=True,
-                mode="train",
             )
 
             failures = self.data_io.loader.load_table_failures(
-                turbine_reg_id, date_start, date_end
+                panel_id, date_start, date_end
             )
 
-            failures["TURBINE_REG_ID"] = turbine_reg_id
+            failures["TURBINE_REG_ID"] = panel_id
 
-            if self.keep_local:
-                self.data_io.saver.save_something(
-                    data=failures,
-                    filename=f"failures_{str(turbine_reg_id)}",
-                    folder="data\\failures",
-                )
-
-            if individual_turbines:
+            if individual_panels:
                 self.train_general(
                     tchalas=[
                         t
-                        for t in self.tchalas
-                        if t.turbine_level == Tchala.LEVEL_TURBINE
+                        for t in self.models
+                        if t.model_level == MLModel.LEVEL_TURBINE
                     ],
-                    data_turbine=data_turbine,
+                    data_turbine=data_panel,
                     failures=failures,
-                    turbine_level=Tchala.LEVEL_TURBINE,
+                    turbine_level=MLModel.LEVEL_TURBINE,
                 )
         except Exception as exc:
             mylog.INFO_LOGGER.error(
                 "Something went wrong when training the turbine "
-                f"{turbine_reg_id}: {exc}"
+                f"{panel_id}: {exc}"
             )
             mylog.EXC_LOGGER.exception(exc)
-            data_turbine = pd.DataFrame()
+            data_panel = pd.DataFrame()
             failures = pd.DataFrame()
         finally:
-            return data_turbine, failures  # pylint: disable:lost-exception
+            return data_panel, failures  # pylint: disable:lost-exception
 
     # Test method
     def train_turbine_model_test(
-        self,
-        turbine_model_reg_id: list[int],
-        data_model: pd.DataFrame,
-        failures_model: pd.DataFrame,
+            self,
+            turbine_model_reg_id: list[int],
+            data_model: pd.DataFrame,
+            failures_model: pd.DataFrame,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         mylog.INFO_LOGGER.info(f"Starting turbines of model(s) {turbine_model_reg_id}")
 
@@ -291,11 +206,11 @@ class Manager:
 
         self.train_general(
             tchalas=[
-                tch for tch in self.tchalas if tch.turbine_level == Tchala.LEVEL_MODEL
+                tch for tch in self.models if tch.model_level == MLModel.LEVEL_MODEL
             ],
             data_turbine=data_model,
             failures=failures_model,
-            turbine_level=Tchala.LEVEL_MODEL,
+            turbine_level=MLModel.LEVEL_MODEL,
         )
 
     def predict_turbine(self, turbine_reg_id: int, continuous_analysis: bool = False):
@@ -309,7 +224,7 @@ class Manager:
                     dt.date.fromisoformat(date_start) - dt.timedelta(days=13)
                 )
 
-            data_turbine = self.prepare_turbine_data(
+            data_turbine = self.prepare_panel_data(
                 turbine_reg_id,
                 date_start_extended,
                 date_end,
@@ -321,7 +236,7 @@ class Manager:
 
             data_turbine = data_turbine.sort_values(by="TS")
 
-            for tchala in self.tchalas:
+            for tchala in self.models:
                 mylog.INFO_LOGGER.info(f"{tchala.name} - Start")
                 try:
                     tchala.predict(data_turbine, turbine_reg_id)
@@ -329,12 +244,12 @@ class Manager:
 
                     if continuous_analysis:
                         tchala.results[
-                            Tchala.ALERTS_TABLE
+                            MLModel.ALERTS_TABLE
                         ] = tchala.generate_continuous_alarms(
-                            tchala.results[Tchala.ALERTS_TABLE]
+                            tchala.results[MLModel.ALERTS_TABLE]
                         )
-                        tchala.results[Tchala.ALERTS_TABLE] = tchala.results[
-                            Tchala.ALERTS_TABLE
+                        tchala.results[MLModel.ALERTS_TABLE] = tchala.results[
+                            MLModel.ALERTS_TABLE
                         ].query("TS >= @date_start")
 
                     self.data_io.saver.save_results(tchala.results)
@@ -350,69 +265,47 @@ class Manager:
             )
             mylog.EXC_LOGGER.exception(exc)
 
-    def prepare_turbine_data(
-        self,
-        turbine_reg_id: int,
-        date_start: str,
-        date_end: str,
-        downtime_ids_to_ignore: list[int] | None,
-        remove_based_on_status: bool,
-        remove_based_on_power: bool,
-        mode: str,
+    def prepare_panel_data(
+            self,
+            panel_id: int,
+            date_start: str,
+            date_end: str,
+            remove_based_on_power: bool = False,
     ) -> pd.DataFrame:
-        channel_reg_ids = self.load_list_of_needed_channels(turbine_reg_id, mode)
-        data_turbine = self.data_io.loader.load_turbine_data(
-            turbine_reg_id, channel_reg_ids, date_start, date_end
-        )
+        channel_ids = self.usable_channels
+        data_panel = self.data_io.loader.load_panel_data(panel_id, channel_ids, date_start, date_end)
 
-        if self.keep_local:
-            self.data_io.saver.save_something(
-                data=data_turbine, filename=str(turbine_reg_id), folder="data\\turbine"
-            )
-
-        if remove_based_on_status:
-            status_ok = self.data_io.loader.load_turbine_status_ok(turbine_reg_id)
-            data_turbine = data_treatment.remove_status_not_ok(data_turbine, status_ok)
-
-        data_turbine = data_treatment.remove_spurious_data(data_turbine)
-        data_turbine = data_treatment.remove_full_lines_nan(data_turbine)
-        data_turbine = data_treatment.remove_duplicates(data_turbine)
-        data_turbine = data_treatment.remove_excessive_zeroes(data_turbine)
-        data_turbine = data_treatment.remove_frozen(data_turbine)
-        data_turbine = data_treatment.compensate_ambient_temperature(
-            data_turbine, channel_amb_temp=27
-        )
+        data_panel = data_treatment.remove_spurious_data(data_panel)
+        data_panel = data_treatment.remove_full_lines_nan(data_panel)
+        data_panel = data_treatment.remove_duplicates(data_panel)
+        # data_panel = data_treatment.remove_excessive_zeroes(data_panel)
+        # data_panel = data_treatment.remove_frozen(data_panel)
+        # data_panel = data_treatment.compensate_ambient_temperature(
+        #     data_panel, channel_amb_temp=27
+        # )
 
         if remove_based_on_power:
-            pnom = self.data_io.loader.load_turbine_pnom(turbine_reg_id)
-            data_turbine = data_treatment.remove_low_power(data_turbine, pnom)
-            data_turbine = data_treatment.remove_excessive_power(data_turbine, pnom)
+            # TODO: Add if there is a channel for power
+            pass
+            # pnom = self.data_io.loader.load_turbine_pnom(panel_id)
+            # data_panel = data_treatment.remove_low_power(data_panel, pnom)
+            # data_panel = data_treatment.remove_excessive_power(data_panel, pnom)
 
-        downtimes = self.data_io.loader.load_downtimes(
-            turbine_reg_id, date_start, date_end
-        )
-        data_turbine = data_treatment.remove_downtimes(
-            data_turbine, downtimes, ids_to_ignore=downtime_ids_to_ignore
-        )
+        data_panel = data_treatment.remove_full_lines_nan(data_panel)
 
-        if self.clean_all_nans:
-            data_turbine = data_turbine.dropna()
-        else:
-            data_turbine = data_treatment.remove_full_lines_nan(data_turbine)
-
-        data_turbine["TURBINE_REG_ID"] = turbine_reg_id
-        data_turbine["TURBINE_MODEL_REG_ID"] = self.data_io.loader.load_turbine_model(
-            turbine_reg_id
+        data_panel["panel_id"] = panel_id
+        data_panel["panel_model_id"] = self.data_io.loader.load_panel_model(
+            panel_id
         )
 
-        return data_turbine
+        return data_panel
 
     def train_general(
-        self,
-        tchalas: list[Tchala],
-        data_turbine: pd.DataFrame,
-        failures: pd.DataFrame,
-        turbine_level: str,
+            self,
+            tchalas: list[MLModel],
+            data_turbine: pd.DataFrame,
+            failures: pd.DataFrame,
+            turbine_level: str,
     ) -> None:
         for tchala in tchalas:
             mylog.INFO_LOGGER.info(f"{tchala.name} - Start")
@@ -430,7 +323,7 @@ class Manager:
             mylog.INFO_LOGGER.info(f"{tchala.name} - All done")
 
     def generate_aggregated_alarms(
-        self, start_day: dt.date | str, end_day: dt.date | str
+            self, start_day: dt.date | str, end_day: dt.date | str
     ):
         try:
             # XXX Temporary, since the calculations for this value must be reviewed
@@ -481,10 +374,10 @@ class Manager:
             mylog.EXC_LOGGER.exception(exc)
 
     def aggregate_alerts_for_day(
-        self,
-        day_predictions: pd.DataFrame,
-        reliability_threshold: float = 0.6,
-        alert_threshold: float = 0.5,
+            self,
+            day_predictions: pd.DataFrame,
+            reliability_threshold: float = 0.6,
+            alert_threshold: float = 0.5,
     ) -> pd.DataFrame:
         # Calculate aggregated alert and its information
         agg_alerts = []
@@ -494,9 +387,9 @@ class Manager:
             ).copy()
 
             final_alert = (
-                turbine_alerts["ALERT"]
-                * turbine_alerts["WEIGHT"]
-                * turbine_alerts["RELIABILITY_CORRECTED"]
+                    turbine_alerts["ALERT"]
+                    * turbine_alerts["WEIGHT"]
+                    * turbine_alerts["RELIABILITY_CORRECTED"]
             )
             final_alert = final_alert.sum() / turbine_alerts["WEIGHT"].sum()
 
@@ -538,23 +431,23 @@ def get_prediction_weight(row):
     prediction_level = row["TURBINE_LEVEL"]
 
     # Default if no condition matches
-    tchala_level = Tchala.LEVEL_ALL
+    tchala_level = MLModel.LEVEL_ALL
 
     if prediction_level.isdigit():  # LEVEL_TURBINE or Single Model
         if int(prediction_level) >= 1000:  # Turbine Reg ID
-            tchala_level = Tchala.LEVEL_TURBINE
+            tchala_level = MLModel.LEVEL_TURBINE
 
-        tchala_level = Tchala.LEVEL_MODEL
+        tchala_level = MLModel.LEVEL_MODEL
 
     if prediction_level.find("_") != -1:
-        tchala_level = Tchala.LEVEL_MODEL
+        tchala_level = MLModel.LEVEL_MODEL
 
     match tchala_level:
-        case Tchala.LEVEL_TURBINE:
+        case MLModel.LEVEL_TURBINE:
             weights.append(4)  # 100% more than 'all'
-        case Tchala.LEVEL_MODEL:
+        case MLModel.LEVEL_MODEL:
             weights.append(3)  # 50% more than 'all'
-        case Tchala.LEVEL_ALL:
+        case MLModel.LEVEL_ALL:
             weights.append(2)
         case _:
             weights.append(0)

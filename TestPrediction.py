@@ -4,13 +4,13 @@ import datetime as dt
 
 from dotenv import dotenv_values
 
-from src.tchala import Tchala
+from src.ml_model import MLModel
 import src.my_logging as mylog
 from src.sql_connection import SQLConnection
 from src.data_io.data_io import DataIO
 from src.manager_manual import ManagerManual
 
-from src.tchala_classifier.tchala_classifier import TchalaClassifier
+from src.tchala_classifier.tchala_classifier import MLModelClassifier
 from src.tchala_regressor.tchala_regressor import TchalaRegressor
 
 # %% Run
@@ -35,8 +35,8 @@ if __name__ == "__main__":
     tchalas = list()
     # Classifiers
     tchalas.append(
-        TchalaClassifier(
-            level=Tchala.LEVEL_MODEL,
+        MLModelClassifier(
+            level=MLModel.LEVEL_MODEL,
             folder=save_folder,
             sql_connection=sql_connection,
             oneout=True

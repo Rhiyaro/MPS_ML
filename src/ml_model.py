@@ -3,23 +3,20 @@ from abc import ABC, abstractmethod
 import pandas as pd
 
 
-class Tchala(ABC):
+class MLModel(ABC):
     # Constants
-    LEVEL_TURBINE = "turbine"
-    LEVEL_MODEL = "turbine_model"
+    LEVEL_PANEL = "panel"
+    LEVEL_MODEL = "model"
     LEVEL_ALL = "all"
 
     MODE_TRAINING = "train"
     MODE_PREDICT = "predict"
     MODE_ONEOUT_TRAINING = "oneout_training"
 
-    ALERTS_TABLE = "tchala_alerts_new"
+    ALERTS_TABLE = "detection_alerts"
 
-    def __init__(self, turbine_level: str, oneout: bool = False) -> None:
-        assert (
-            turbine_level != self.LEVEL_TURBINE or oneout == False
-        ), "Can not train OneOut model for single turbina"
-        self.turbine_level = turbine_level
+    def __init__(self, model_level: str, oneout: bool = False) -> None:
+        self.model_level = model_level
         self.oneout = oneout
 
     @abstractmethod
@@ -39,7 +36,7 @@ class Tchala(ABC):
         pass
 
     def select_possible_channels(
-        self, data: pd.DataFrame, initial_channels: list[int], threshold: float = 0.25
+            self, data: pd.DataFrame, initial_channels: list[int], threshold: float = 0.25
     ) -> tuple[list, list]:
         # DONE: Remove inputs that:
         # [X]Don't appear in all turbines

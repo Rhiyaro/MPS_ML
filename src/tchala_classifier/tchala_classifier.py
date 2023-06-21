@@ -17,7 +17,7 @@ from keras.utils import to_categorical
 import src.my_logging as mylog
 from src import data_treatment
 from src import encoder
-from src.tchala import Tchala
+from src.ml_model import MLModel
 from src.sql_connection import SQLConnection
 from src.tchala_classifier.loader_tchala_classifier import LoaderTchalaClassifier
 
@@ -25,11 +25,11 @@ from src.tchala_classifier.loader_tchala_classifier import LoaderTchalaClassifie
 #  Class
 
 
-class TchalaClassifier(Tchala):
+class MLModelClassifier(MLModel):
     def __init__(
         self,
         input_chans: list[int] = None,
-        level: str = Tchala.LEVEL_MODEL,
+        level: str = MLModel.LEVEL_MODEL,
         folder: str = "output\\test_runs",
         model_type: str = "keras",
         binary: bool = False,
@@ -46,7 +46,7 @@ class TchalaClassifier(Tchala):
         sql_connection: SQLConnection = None,
         oneout: bool = False,
     ):
-        super().__init__(turbine_level=level, oneout=oneout)
+        super().__init__(model_level=level, oneout=oneout)
 
         self.step = "creation"
 
@@ -82,8 +82,8 @@ class TchalaClassifier(Tchala):
 
     def load_classifier(self, turbine_reg_id: int) -> tuple[pd.DataFrame, keras.Model]:
         level = (
-            self.turbine_level
-            if self.turbine_level != Tchala.LEVEL_TURBINE
+            self.model_level
+            if self.model_level != MLModel.LEVEL_TURBINE
             else str(turbine_reg_id)
         )
 
@@ -115,7 +115,7 @@ class TchalaClassifier(Tchala):
 
         if self.oneout:
             final_results = {
-                "mode": Tchala.MODE_ONEOUT_TRAINING,
+                "mode": MLModel.MODE_ONEOUT_TRAINING,
                 "oneout_trainings": list(),
             }
             for turbine in turbines:
@@ -328,8 +328,8 @@ class TchalaClassifier(Tchala):
         mylog.INFO_LOGGER.info(f"{self.name} report: {metrics}")
 
         results = {
-            "mode": Tchala.MODE_TRAINING,
-            "TURBINE_LEVEL": self.turbine_level,
+            "mode": MLModel.MODE_TRAINING,
+            "TURBINE_LEVEL": self.model_level,
             "TURBINE_MODEL_REG_IDS": turbine_models,
             "INPUTS": inputs,
             "SCALER_DATA": scaler,
@@ -597,7 +597,7 @@ class TchalaClassifier(Tchala):
         # Compile Results
         self.step = "build_results_prediction"
         self.results = {
-            "mode": Tchala.MODE_PREDICT,
+            "mode": MLModel.MODE_PREDICT,
             "TCHALA_TYPE": "CLASSIFIER",
             "TCHALA_TRAINING_RESULTS_ID": classifier_id,
             "TURBINE_REG_ID": turbine_reg_id,
@@ -648,13 +648,13 @@ class TchalaClassifier(Tchala):
         del self.results["mode"]
 
         match mode:
-            case Tchala.MODE_TRAINING:
+            case MLModel.MODE_TRAINING:
                 results = self.compile_results_training(self.results)
 
-            case Tchala.MODE_PREDICT:
+            case MLModel.MODE_PREDICT:
                 results = self.compile_results_prediction(self.results)
 
-            case Tchala.MODE_ONEOUT_TRAINING:
+            case MLModel.MODE_ONEOUT_TRAINING:
                 results = dict()
                 total_training_results = list()
                 for result_dict in self.results["oneout_trainings"]:
@@ -699,7 +699,7 @@ class TchalaClassifier(Tchala):
         }
 
         # subfolder = "_".join([str(x) for x in turbine_models])
-        midfolder = f"{self.turbine_level}"
+        midfolder = f"{self.model_level}"
 
         subfolder = datetime.datetime.fromisoformat(time_run).strftime(
             "%Y-%m-%d_%Hh%Mm%Ss"
@@ -724,7 +724,7 @@ class TchalaClassifier(Tchala):
             "TCHALA_TRAINING_RESULTS_ID"
         ]
 
-        results = {Tchala.ALERTS_TABLE: table_alert}
+        results = {MLModel.ALERTS_TABLE: table_alert}
 
         return results
 
