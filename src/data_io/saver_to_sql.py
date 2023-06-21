@@ -8,7 +8,7 @@ class SaverToSQL(Saver):
 
     def __init__(self, 
                  sql_connection: SQLConnection,
-                 main_folder: str = 'output\\results\\') -> None:
+                 main_folder: str = 'output\\test_runs') -> None:
         self.sql_connection = sql_connection
         self.main_folder = main_folder
 

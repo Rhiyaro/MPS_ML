@@ -19,7 +19,7 @@ class SaverToFile(Saver):
                        main_folder: str = None
                        ) -> None:
         
-        if main_folder == None:
+        if main_folder is None:
             main_folder = self.main_folder
         
         complete_path = f'{main_folder}\\{path}.csv'
