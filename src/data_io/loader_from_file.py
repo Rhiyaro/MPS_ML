@@ -29,3 +29,6 @@ class LoaderFromFile(Loader):
 
     def load_panel_model(self, panel_id:int) -> int:
         return super().load_panel_model(panel_id)
+
+    def load_panel_failures(self, panel_id: int, start_date: str, end_date: str) -> pd.DataFrame:
+        return super().load_panel_failures(panel_id, start_date, end_date)

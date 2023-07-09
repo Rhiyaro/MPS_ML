@@ -1,13 +1,10 @@
 import datetime as dt
 
 import pandas as pd
-from numpy import prod as np_prod
 
 import src.my_logging as mylog
 import src.data_treatment as data_treatment
-from src import checker
 from src.data_io.data_io import DataIO
-from src.data_io.saver_to_file import SaverToFile
 from src.ml_model import MLModel
 
 
@@ -76,7 +73,7 @@ class Manager:
             [tch for tch in self.models if tch.model_level == MLModel.LEVEL_ALL],
             data_all,
             failures_all,
-            turbine_level=MLModel.LEVEL_ALL,
+            training_level=MLModel.LEVEL_ALL,
         )
 
         turbines_trained = list(data_all["TURBINE_REG_ID"].unique())
@@ -134,15 +131,17 @@ class Manager:
                 [t for t in self.models if t.model_level == MLModel.LEVEL_MODEL],
                 data_model,
                 failures_model,
-                turbine_level=MLModel.LEVEL_MODEL,
+                training_level=MLModel.LEVEL_MODEL,
             )
 
         return data_model, failures_model
 
     def train_panel(
             self, panel_id: int, individual_panels: bool = True
-    ) -> list[pd.DataFrame]:
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
         mylog.INFO_LOGGER.info(f"Training for turbine {panel_id} started")
+        data_panel = pd.DataFrame()
+        failures = pd.DataFrame()
         try:
             date_start, date_end = self.load_dates_train(panel_id)
 
@@ -163,105 +162,57 @@ class Manager:
                 date_end,
             )
 
-            failures = self.data_io.loader.load_table_failures(
+            failures = self.data_io.loader.load_panel_failures(
                 panel_id, date_start, date_end
             )
 
-            failures["TURBINE_REG_ID"] = panel_id
-
             if individual_panels:
                 self.train_general(
-                    tchalas=[
-                        t
-                        for t in self.models
-                        if t.model_level == MLModel.LEVEL_TURBINE
-                    ],
-                    data_turbine=data_panel,
+                    models=[t for t in self.models if t.model_level == MLModel.LEVEL_PANEL],
+                    data_panel=data_panel,
                     failures=failures,
-                    turbine_level=MLModel.LEVEL_TURBINE,
+                    training_level=MLModel.LEVEL_PANEL,
                 )
         except Exception as exc:
             mylog.INFO_LOGGER.error(
-                "Something went wrong when training the turbine "
+                "Something went wrong when training the panel "
                 f"{panel_id}: {exc}"
             )
             mylog.EXC_LOGGER.exception(exc)
             data_panel = pd.DataFrame()
             failures = pd.DataFrame()
         finally:
-            return data_panel, failures  # pylint: disable:lost-exception
+            return data_panel, failures
 
-    # Test method
-    def train_turbine_model_test(
-            self,
-            turbine_model_reg_id: list[int],
-            data_model: pd.DataFrame,
-            failures_model: pd.DataFrame,
-    ) -> tuple[pd.DataFrame, pd.DataFrame]:
-        mylog.INFO_LOGGER.info(f"Starting turbines of model(s) {turbine_model_reg_id}")
-
-        mylog.INFO_LOGGER.info(
-            f"Training for turbine model(s) {turbine_model_reg_id} started"
-        )
-
-        self.train_general(
-            tchalas=[
-                tch for tch in self.models if tch.model_level == MLModel.LEVEL_MODEL
-            ],
-            data_turbine=data_model,
-            failures=failures_model,
-            turbine_level=MLModel.LEVEL_MODEL,
-        )
-
-    def predict_turbine(self, turbine_reg_id: int, continuous_analysis: bool = False):
-        mylog.INFO_LOGGER.info(f"Prediction for turbine {turbine_reg_id} started")
+    def predict_panel(self, panel_id: int):
+        mylog.INFO_LOGGER.info(f"Prediction for panel {panel_id} started")
         try:
-            date_start, date_end = self.load_dates_predict(turbine_reg_id)
-
-            date_start_extended = date_start
-            if continuous_analysis:
-                date_start_extended = str(
-                    dt.date.fromisoformat(date_start) - dt.timedelta(days=13)
-                )
+            date_start, date_end = self.load_dates_predict(panel_id)
 
             data_turbine = self.prepare_panel_data(
-                turbine_reg_id,
-                date_start_extended,
-                date_end,
-                downtime_ids_to_ignore=None,
-                remove_based_on_status=True,
-                remove_based_on_power=False,
-                mode="predict",
+                panel_id=panel_id,
+                date_start=date_start,
+                date_end=date_end,
             )
 
             data_turbine = data_turbine.sort_values(by="TS")
 
-            for tchala in self.models:
-                mylog.INFO_LOGGER.info(f"{tchala.name} - Start")
+            for mlmodel in self.models:
+                mylog.INFO_LOGGER.info(f"{mlmodel.name} - Start")
                 try:
-                    tchala.predict(data_turbine, turbine_reg_id)
-                    tchala.compile_results()
+                    mlmodel.predict(data_turbine, panel_id)
+                    mlmodel.compile_results()
 
-                    if continuous_analysis:
-                        tchala.results[
-                            MLModel.ALERTS_TABLE
-                        ] = tchala.generate_continuous_alarms(
-                            tchala.results[MLModel.ALERTS_TABLE]
-                        )
-                        tchala.results[MLModel.ALERTS_TABLE] = tchala.results[
-                            MLModel.ALERTS_TABLE
-                        ].query("TS >= @date_start")
-
-                    self.data_io.saver.save_results(tchala.results)
-                    tchala.reset()
+                    self.data_io.saver.save_results(mlmodel.results)
+                    mlmodel.reset()
                 except Exception as exc:
                     mylog.INFO_LOGGER.error(exc)
                     mylog.EXC_LOGGER.exception(exc)
-                mylog.INFO_LOGGER.info(f"{tchala.name} - All done")
+                mylog.INFO_LOGGER.info(f"{mlmodel.name} - All done")
         except Exception as exc:
             mylog.INFO_LOGGER.error(
                 "Something went wrong when training the turbine: "
-                f"{turbine_reg_id}: {exc}"
+                f"{panel_id}: {exc}"
             )
             mylog.EXC_LOGGER.exception(exc)
 
@@ -302,168 +253,21 @@ class Manager:
 
     def train_general(
             self,
-            tchalas: list[MLModel],
-            data_turbine: pd.DataFrame,
+            models: list[MLModel],
+            data_panel: pd.DataFrame,
             failures: pd.DataFrame,
-            turbine_level: str,
+            training_level: str,
     ) -> None:
-        for tchala in tchalas:
-            mylog.INFO_LOGGER.info(f"{tchala.name} - Start")
+        for model in models:
+            mylog.INFO_LOGGER.info(f"{model.name} - Start")
             try:
-                tchala.train(data_turbine, failures)
-                tchala.compile_results()
-                self.data_io.saver.save_results(tchala.results)
-                tchala.reset()
-                done = True
+                model.train(data_panel, failures)
+                model.compile_results()
+                self.data_io.saver.save_results(model.results)
+                model.reset()
             except Exception as exc:
                 mylog.INFO_LOGGER.error(
-                    f"Error during train sequence for TCHALA {tchala.name}: {exc}"
+                    f"Error during train sequence for model {model.name}: {exc}"
                 )
                 mylog.EXC_LOGGER.exception(exc)
-            mylog.INFO_LOGGER.info(f"{tchala.name} - All done")
-
-    def generate_aggregated_alarms(
-            self, start_day: dt.date | str, end_day: dt.date | str
-    ):
-        try:
-            # XXX Temporary, since the calculations for this value must be reviewed
-            reliability_threshold = 1  # 0.6
-            alert_threshold = 0.5
-
-            predictions = self.data_io.loader.get_generated_alerts(
-                start_date=str(start_day), end_date=str(end_day)
-            )
-
-            if predictions.empty:
-                raise Exception(
-                    f"No predictions for period between {start_day} and {end_day}"
-                )
-
-            predictions["RELIABILITY"] = predictions["RELIABILITY"].fillna(
-                reliability_threshold
-            )
-
-            # Get weight of each alerts based on TCHALA Level
-            predictions["WEIGHT"] = predictions.apply(get_prediction_weight, axis=1)
-
-            predictions["RELIABILITY_CORRECTED"] = predictions["RELIABILITY"].apply(
-                lambda x: 1 if x > reliability_threshold else reliability_threshold
-            )
-
-            agg_alerts = list()
-            for day in predictions["TS"].unique():
-                day_predictions = predictions.query("TS == @day").copy()
-                day_predictions = self.aggregate_alerts_for_day(
-                    day_predictions=day_predictions,
-                    reliability_threshold=reliability_threshold,
-                    alert_threshold=alert_threshold,
-                )
-                agg_alerts.append(day_predictions)
-
-            agg_alerts = pd.concat(agg_alerts)
-
-            agg_alerts = agg_alerts.round({"RELIABILITY": 3})
-
-            # Save new alerts
-            self.data_io.saver.save_dataframe(data=agg_alerts, path="tchala_alerts_new")
-
-        except Exception as exc:
-            mylog.INFO_LOGGER.error(
-                f"Something went wrong when aggregating TCHALA alerts: {exc}"
-            )
-            mylog.EXC_LOGGER.exception(exc)
-
-    def aggregate_alerts_for_day(
-            self,
-            day_predictions: pd.DataFrame,
-            reliability_threshold: float = 0.6,
-            alert_threshold: float = 0.5,
-    ) -> pd.DataFrame:
-        # Calculate aggregated alert and its information
-        agg_alerts = []
-        for turbine_reg_id in day_predictions["TURBINE_REG_ID"].unique():
-            turbine_alerts = day_predictions.query(
-                "TURBINE_REG_ID == @turbine_reg_id"
-            ).copy()
-
-            final_alert = (
-                    turbine_alerts["ALERT"]
-                    * turbine_alerts["WEIGHT"]
-                    * turbine_alerts["RELIABILITY_CORRECTED"]
-            )
-            final_alert = final_alert.sum() / turbine_alerts["WEIGHT"].sum()
-
-            final_alert = 1 if final_alert >= alert_threshold else 0
-
-            subsystem_id = turbine_alerts["ALARM_SUBSYSTEM_REG_ID"].iloc[0]
-            if len(turbine_alerts["ALARM_SUBSYSTEM_REG_ID"]) > 1:
-                subsystem_id = turbine_alerts.loc[turbine_alerts["WEIGHT"].idxmax()][
-                    "ALARM_SUBSYSTEM_REG_ID"
-                ]
-
-            reliability = turbine_alerts["RELIABILITY"].sum() / len(turbine_alerts)
-
-            final_alert = {
-                "TS": day_predictions["TS"].iloc[0],
-                "TURBINE_REG_ID": turbine_reg_id,
-                "ALARM_SUBSYSTEM_REG_ID": subsystem_id,
-                "ALERT": final_alert,
-                "RELIABILITY": reliability,
-            }
-
-            agg_alerts.append(final_alert)
-
-        agg_alerts = pd.DataFrame(agg_alerts)
-
-        agg_alerts["TCHALA_TYPE"] = "AGGREGATED"
-
-        return agg_alerts
-
-
-def get_prediction_weight(row):
-    # Based on TCHALA Level and possible other information of the prediciton,
-    # get weight of alert
-
-    weights = list()
-
-    # --- Weight based on Turbine Level
-    # tchala_type = row["TCHALA_TYPE"]
-    prediction_level = row["TURBINE_LEVEL"]
-
-    # Default if no condition matches
-    tchala_level = MLModel.LEVEL_ALL
-
-    if prediction_level.isdigit():  # LEVEL_TURBINE or Single Model
-        if int(prediction_level) >= 1000:  # Turbine Reg ID
-            tchala_level = MLModel.LEVEL_TURBINE
-
-        tchala_level = MLModel.LEVEL_MODEL
-
-    if prediction_level.find("_") != -1:
-        tchala_level = MLModel.LEVEL_MODEL
-
-    match tchala_level:
-        case MLModel.LEVEL_TURBINE:
-            weights.append(4)  # 100% more than 'all'
-        case MLModel.LEVEL_MODEL:
-            weights.append(3)  # 50% more than 'all'
-        case MLModel.LEVEL_ALL:
-            weights.append(2)
-        case _:
-            weights.append(0)
-
-    # --- Weight based on Tchala Type
-    tchala_type = row["TCHALA_TYPE"]
-
-    match tchala_type:
-        case "REGRESSOR":
-            weights.append(1)
-        case "CLASSIFIER":
-            weights.append(5)
-        case _:
-            weights.append(0)
-
-    # Final Result
-    weight = np_prod(weights)
-
-    return weight
+            mylog.INFO_LOGGER.info(f"{model.name} - All done")

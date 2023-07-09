@@ -29,5 +29,9 @@ class Loader(ABC):
         raise NotImplemented()
 
     @abstractmethod
-    def load_panel_model(self, panel_id:int) -> int:
+    def load_panel_model(self, panel_id: int) -> int:
+        raise NotImplemented()
+
+    @abstractmethod
+    def load_panel_failures(self, panel_id: int, start_date: str, end_date: str) -> pd.DataFrame:
         raise NotImplemented()

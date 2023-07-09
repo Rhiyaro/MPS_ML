@@ -40,9 +40,9 @@ class LoaderFromSQL(Loader):
         extra_clauses = " ".join(extra_clauses)
 
         query = (
-            "SELECT panel_id, failure_classification_id, ts_start, ts_end "
-            "FROM failure_events "
-            "WHERE 1=1 " + extra_clauses
+                "SELECT panel_id, failure_classification_id, ts_start, ts_end "
+                "FROM failure_events "
+                "WHERE 1=1 " + extra_clauses
         )
 
         failures = self.load_something(query)
@@ -71,7 +71,7 @@ class LoaderFromSQL(Loader):
         data = data[(data.index >= date_start) & (data.index < date_end)]
         return data
 
-    def load_panel_model(self, panel_id:int) -> int | None:
+    def load_panel_model(self, panel_id: int) -> int | None:
 
         query = (
             "SELECT panel_model_id "
@@ -87,3 +87,17 @@ class LoaderFromSQL(Loader):
         panel_model_id = panel_model_id.iloc[0, 0]
 
         return panel_model_id
+
+    def load_panel_failures(self, panel_id: int, start_date: str, end_date: str) -> pd.DataFrame:
+        query = (
+            "SELECT panel_id, alert_classification_id, ts_start, ts_end "
+            "FROM failure_event "
+            f"WHERE panel_id = {panel_id}"
+        )
+
+        panel_failures = self.load_something(query)
+
+        panel_failures = panel_failures.query("ts_start >= @start_date and ts_start <= @end_date")
+        panel_failures["ts_end"] = panel_failures["ts_end"].fillna("2100-01-01 00:00:00")
+
+        return panel_failures

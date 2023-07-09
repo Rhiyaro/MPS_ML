@@ -103,7 +103,7 @@ if __name__ == "__main__":
 
     # Running predictions
     for turbine in predict_turbines:
-        manager.predict_turbine(turbine, continuous_analysis=True)
+        manager.predict_panel(turbine, continuous_analysis=True)
 
     # Generating aggregated alarms
     # manager.generate_aggregated_alarms(

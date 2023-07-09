@@ -19,6 +19,9 @@ class MLModel(ABC):
         self.model_level = model_level
         self.oneout = oneout
 
+        self.name = "MLModel"
+        self.results = {}
+
     @abstractmethod
     def train(self, data: pd.DataFrame, failures: pd.DataFrame) -> None:
         pass
@@ -31,9 +34,8 @@ class MLModel(ABC):
     def compile_results(self) -> None:
         pass
 
-    @abstractmethod
     def reset(self) -> None:
-        pass
+        self.results = {}
 
     def select_possible_channels(
             self, data: pd.DataFrame, initial_channels: list[int], threshold: float = 0.25
